@@ -11,7 +11,8 @@ class OnlineManager {
         this.spectatorConns = [];
         this.broadcastChannel = null;
         this.isHost = false;
-        this.myPiece = 'X'; // Host is X, Guest is O, Spectator is 'spectator'
+        this.myPiece = 'spectator';
+        this.seats = { X: null, O: null }; // Host is X, Guest is O, Spectator is 'spectator'
         this.myAvatar = '🦊'; // Default avatar
         this.guestAvatar = '🐯'; // Tracked by host
         this.roomCode = null;
@@ -53,7 +54,8 @@ class OnlineManager {
     createRoom(timeLimit = 30, callback) {
         this.roomCode = this.generateRoomCode();
         this.isHost = true;
-        this.myPiece = 'X';
+        this.myPiece = 'spectator';
+        this.seats = { X: null, O: null };
         this.roomTimeLimit = timeLimit;
         this.guestConn = null;
         this.spectatorConns = [];
@@ -68,10 +70,16 @@ class OnlineManager {
                         connection.send({
                             type: 'INIT_GAME',
                             roomCode: this.roomCode,
-                            hostPiece: 'X',
-                            guestPiece: 'O',
+                            hostPiece: 'spectator',
+                            guestPiece: 'spectator',
+                            seats: this.seats,
                             hostAvatar: this.myAvatar,
-                            timeLimit: this.roomTimeLimit
+                            timeLimit: this.roomTimeLimit,
+                            board: this.game.board,
+                            currentTurn: this.game.currentTurn,
+                            score: this.game.score,
+                            usedSwapCard: this.game.usedSwapCard,
+                            moveHistory: this.game.moveHistory
                         });
                     };
                     if (connection.open) sendInit();
@@ -83,14 +91,16 @@ class OnlineManager {
                         connection.send({
                             type: 'INIT_GAME',
                             roomCode: this.roomCode,
-                            hostPiece: 'X',
+                            hostPiece: 'spectator',
                             guestPiece: 'spectator',
+                            seats: this.seats,
                             hostAvatar: this.myAvatar,
                             guestAvatar: this.guestAvatar,
                             timeLimit: this.roomTimeLimit,
                             board: this.game.board,
                             currentTurn: this.game.currentTurn,
                             score: this.game.score,
+                            usedSwapCard: this.game.usedSwapCard,
                             moveHistory: this.game.moveHistory
                         });
                     };
@@ -239,6 +249,35 @@ class OnlineManager {
         this.game.onOnlineDisconnected();
     }
 
+
+    requestSeat(color) {
+        if (this.isHost) {
+            this.processSeatRequest('host', color);
+        } else {
+            // Local broadcast fallback (when offline)
+            if (this.broadcastChannel && !this.guestConn) {
+                this.sendData({ type: 'SIT_REQUEST', color: color, peerId: this.peer ? this.peer.id : 'local-guest' });
+            }
+            if (this.guestConn) {
+                this.guestConn.send({ type: 'SIT_REQUEST', color: color, peerId: this.peer.id });
+            }
+        }
+    }
+
+    processSeatRequest(peerId, color) {
+        if (!this.isHost) return;
+        if (!this.seats[color]) {
+            if (this.seats['X'] === peerId) this.seats['X'] = null;
+            if (this.seats['O'] === peerId) this.seats['O'] = null;
+            
+            this.seats[color] = peerId;
+            
+            const state = { type: 'SEAT_UPDATE', seats: this.seats };
+            this.handleIncomingData(state, null);
+            this.sendData(state);
+        }
+    }
+
     startPing() {
         this.stopPing();
         this.pingInterval = setInterval(() => {
@@ -307,8 +346,9 @@ class OnlineManager {
                         this.sendData({
                             type: 'INIT_GAME',
                             roomCode: this.roomCode,
-                            hostPiece: 'X',
-                            guestPiece: 'O',
+                            hostPiece: 'spectator',
+                            guestPiece: 'spectator',
+                            seats: this.seats,
                             hostAvatar: this.myAvatar,
                             timeLimit: this.roomTimeLimit
                         });
@@ -317,23 +357,54 @@ class OnlineManager {
                         this.sendData({
                             type: 'INIT_GAME',
                             roomCode: this.roomCode,
-                            hostPiece: 'X',
+                            hostPiece: 'spectator',
                             guestPiece: 'spectator',
+                            seats: this.seats,
                             hostAvatar: this.myAvatar,
                             guestAvatar: this.guestAvatar,
                             timeLimit: this.roomTimeLimit,
                             board: this.game.board,
                             currentTurn: this.game.currentTurn,
                             score: this.game.score,
+                            usedSwapCard: this.game.usedSwapCard,
                             moveHistory: this.game.moveHistory
                         });
                     }
                 }
                 break;
 
+
+            case 'SIT_REQUEST':
+                if (this.isHost) {
+                    const requesterId = sourceConn ? sourceConn.peer : data.peerId;
+                    this.processSeatRequest(requesterId, data.color);
+                }
+                break;
+                
+            case 'SEAT_UPDATE':
+                this.seats = data.seats;
+                if (data.usedSwapCard) {
+                    // clone it to avoid reference issues
+                    this.game.usedSwapCard = JSON.parse(JSON.stringify(data.usedSwapCard));
+                }
+                if (data.swapInitiator) {
+                    this.game.playSwapAnimation(data.swapInitiator);
+                }
+                const myId = this.isHost ? 'host' : (this.peer ? this.peer.id : 'local-guest');
+                if (this.seats['X'] === myId) this.myPiece = 'X';
+                else if (this.seats['O'] === myId) this.myPiece = 'O';
+                else this.myPiece = 'spectator';
+                this.game.updateUI();
+                break;
+
             case 'INIT_GAME':
                 if (!this.isHost && !this.isConnected) {
-                    this.myPiece = data.guestPiece;
+                    this.seats = data.seats || { X: null, O: null };
+                    const myId = this.peer ? this.peer.id : 'local-guest';
+                    if (this.seats['X'] === myId) this.myPiece = 'X';
+                    else if (this.seats['O'] === myId) this.myPiece = 'O';
+                    else this.myPiece = 'spectator';
+                    
                     this.game.onOnlineConnected({
                         isHost: false,
                         myPiece: this.myPiece,
@@ -344,6 +415,7 @@ class OnlineManager {
                         board: data.board,
                         currentTurn: data.currentTurn,
                         score: data.score,
+                        usedSwapCard: data.usedSwapCard,
                         moveHistory: data.moveHistory
                     });
                     this.isConnected = true;
@@ -380,6 +452,43 @@ class OnlineManager {
 
             case 'RESIGN':
                 this.game.receiveOnlineResign();
+                break;
+
+            case 'DRAW_REQUEST':
+                this.game.receiveOnlineDrawRequest();
+                break;
+
+            case 'DRAW_RESPONSE':
+                this.game.receiveOnlineDrawResponse(data.accepted);
+                break;
+
+            case 'SWAP_CARD':
+                if (this.isHost) {
+                    const requesterId = sourceConn ? sourceConn.peer : 'host';
+                    let requesterColor = null;
+                    if (this.seats['X'] === requesterId) requesterColor = 'X';
+                    else if (this.seats['O'] === requesterId) requesterColor = 'O';
+
+                    if (requesterColor && this.game.currentTurn === requesterColor && !this.game.usedSwapCard[requesterColor]) {
+                        // Mark used based on current color BEFORE swap
+                        this.game.usedSwapCard[requesterColor] = true;
+                        
+                        // Swap seats
+                        const tempSeat = this.seats['X'];
+                        this.seats['X'] = this.seats['O'];
+                        this.seats['O'] = tempSeat;
+                        
+                        // Swap card usage states so the "used" status follows the player!
+                        const tempUsed = this.game.usedSwapCard['X'];
+                        this.game.usedSwapCard['X'] = this.game.usedSwapCard['O'];
+                        this.game.usedSwapCard['O'] = tempUsed;
+                        
+                        // Broadcast both the card usage and seat update
+                        const state = { type: 'SEAT_UPDATE', seats: this.seats, usedSwapCard: this.game.usedSwapCard, swapInitiator: requesterColor };
+                        this.handleIncomingData(state, null);
+                        this.sendData(state);
+                    }
+                }
                 break;
 
             case 'EMOTE':
@@ -437,6 +546,25 @@ class OnlineManager {
     sendResign() {
         if (this.myPiece === 'spectator') return;
         this.sendData({ type: 'RESIGN' });
+    }
+
+    sendDrawRequest() {
+        if (this.myPiece === 'spectator') return;
+        this.sendData({ type: 'DRAW_REQUEST' });
+    }
+
+    sendDrawResponse(accepted) {
+        if (this.myPiece === 'spectator') return;
+        this.sendData({ type: 'DRAW_RESPONSE', accepted });
+    }
+
+    sendSwapCard() {
+        if (this.myPiece === 'spectator') return;
+        if (this.isHost) {
+            this.handleIncomingData({ type: 'SWAP_CARD' }, null);
+        } else {
+            this.sendData({ type: 'SWAP_CARD' });
+        }
     }
 
     sendEmote(emoji) {

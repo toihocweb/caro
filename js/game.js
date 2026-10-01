@@ -1,128 +1,450 @@
-/**
- * Caro Master Game Controller
- * Integrates Rules, AI, Audio, P2P Online, and DOM UI.
- */
 class CaroGame {
     constructor() {
         this.boardSize = 15;
-        this.board = []; // 2D array: null, 'X', or 'O'
-        this.moveHistory = []; // Array of { r, c, player, timestamp }
-        this.currentTurn = 'X';
-        this.gameMode = 'ai'; // 'ai', 'local', 'online'
-        this.aiDifficulty = 'medium'; // 'easy', 'medium', 'hard'
-        this.isGameOver = false;
-        this.winner = null;
-        this.winningLine = null;
-        this.lastMove = null;
-        this.hoverCell = null;
-        this.score = { X: 0, O: 0, ties: 0 };
-        this.turnTimeLimit = 30; // seconds (0 = unlimited)
-        this.turnTimeLeft = 30;
+        this.board = [];
+        this.moveHistory = [];
+        this.zoomLevel = 1.0;
+        this.panX = 0;
+        this.panY = 0;
+        
+        this.currentTurn = 'X'; // X (Black) goes first
+        this.gameMode = 'ai'; // 'ai' or 'online'
+        
+        this.rules = new CaroRules(this.boardSize);
+        if (typeof CaroAI !== 'undefined') {
+            this.ai = new CaroAI(this.rules);
+        }
+        
+        this.turnTimeLimit = 30; // seconds
+        this.timeLeft = 30;
         this.timerInterval = null;
 
-        // Rule engine
-        this.rules = new CaroRules(this.boardSize);
-        // AI engine
-        this.ai = new CaroAI(this.rules, 'O');
-        
-        // Online Manager
-        this.online = new OnlineManager(this);
-
-        // DOM elements cache
-        this.dom = {};
-
-        // Wait a tick for DOM to be ready before 3D init
-        setTimeout(() => {
-            this.caro3D = new Caro3D(this);
-        }, 100);
-
-        this.init();
-    }
-
-    init() {
         this.cacheDOM();
-        this.initBoardState();
+        this.initBoardArray();
         this.renderBoardGrid();
         this.bindEvents();
+        
+        this.isGameOver = false;
+        
+        // Setup initial UI
+        if (this.dom.tabBtns.length > 0) {
+            this.dom.tabBtns[0].click();
+        }
+        
         this.checkURLParams();
         this.updateUI();
     }
-
+    
+    checkURLParams() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomCode = urlParams.get('room');
+        if (roomCode) {
+            this.gameMode = 'online';
+            this.onlineManager = new OnlineManager(this);
+            this.onlineManager.joinRoom(roomCode, () => {
+                this.addChatLog('Đã kết nối thành công!', true);
+            }, () => {
+                this.addChatLog('Lỗi kết nối hoặc phòng không tồn tại.', true);
+            });
+            this.addChatLog('Đang kết nối phòng ' + roomCode + '...', true);
+            if (this.dom.onlineModal) {
+                this.dom.onlineModal.style.display = 'none';
+            }
+        }
+    }
+    
     cacheDOM() {
         this.dom = {
             boardContainer: document.getElementById('goban-board'),
             boardWrapper: document.getElementById('board-wrapper'),
-            turnIndicator: document.getElementById('turn-indicator'),
-            playerXCard: document.getElementById('player-x-card'),
-            playerOCard: document.getElementById('player-o-card'),
-            timerDisplay: document.getElementById('timer-countdown'),
-            timerProgress: document.getElementById('timer-progress-bar'),
-            scoreX: document.getElementById('score-x'),
-            scoreO: document.getElementById('score-o'),
-            moveLogList: document.getElementById('move-log-list'),
-            moveCountBadge: document.getElementById('move-count-badge'),
-
-            // Selectors
-            themeSelect: document.getElementById('theme-select'),
-            pieceSelect: document.getElementById('piece-select'),
+            btnSitBoard: document.getElementById('btn-sit-board'),
             
-            // Buttons
-            btnToggle3D: document.getElementById('btn-toggle-3d'),
-            btnNewGame: document.getElementById('btn-new-game'),
+            btnDraw: document.getElementById('btn-draw'),
             btnUndo: document.getElementById('btn-undo'),
-            btnHint: document.getElementById('btn-hint'),
-            btnAudio: document.getElementById('btn-audio'),
-            btnRulesModal: document.getElementById('btn-rules-modal'),
-            btnOnlineModal: document.getElementById('btn-online-modal'),
+            btnResign: document.getElementById('btn-resign'),
+            btnNewGame: document.getElementById('btn-new-game'),
+            btnOnline: document.getElementById('btn-online'),
+            
+            slot1: document.getElementById('slot-1'),
+            btnSit1: document.getElementById('btn-sit-1'),
+            name1: document.getElementById('name-1'),
+            card1: document.getElementById('card-1'),
 
-            // Modals
-            rulesModal: document.getElementById('rules-modal'),
+            timer1: document.getElementById('timer-1'),
+            
+            slot2: document.getElementById('slot-2'),
+            btnSit2: document.getElementById('btn-sit-2'),
+            name2: document.getElementById('name-2'),
+            card2: document.getElementById('card-2'),
+
+            timer2: document.getElementById('timer-2'),
+            
+            roomTitle: document.getElementById('room-title'),
+            roomTime: document.getElementById('room-time'),
+            
+            tabBtns: document.querySelectorAll('.tab-btn'),
+            tabPanes: document.querySelectorAll('.tab-pane'),
+            chatLog: document.getElementById('chat-log'),
+            chatInput: document.getElementById('chat-input'),
+            tabMoves: document.getElementById('tab-moves'),
+            
             onlineModal: document.getElementById('online-modal'),
-            gameOverModal: document.getElementById('game-over-modal'),
-            confirmModal: document.getElementById('confirm-modal'),
-
-            // Online UI elements
-            onlineControlsPanel: document.getElementById('online-controls-panel'),
-            onlineRoomCodeDisplay: document.getElementById('online-room-code-display'),
-            onlinePingDisplay: document.getElementById('online-ping-display'),
-            onlineStatusText: document.getElementById('online-status-text'),
-            btnCopyLink: document.getElementById('btn-copy-link'),
             btnCreateRoom: document.getElementById('btn-create-room'),
             btnJoinRoom: document.getElementById('btn-join-room'),
             inputJoinCode: document.getElementById('input-join-code'),
-            chatInput: document.getElementById('chat-input'),
-            btnSendChat: document.getElementById('btn-send-chat'),
-            chatMessages: document.getElementById('chat-messages'),
-            avatarSelector: document.getElementById('avatar-selector'),
-            playerXAvatar: document.querySelector('.player-x .avatar-stone'),
-            playerOAvatar: document.querySelector('.player-o .avatar-stone'),
-            emoteBar: document.getElementById('emote-bar'),
-
-            // Settings & selectors
-            modeSelect: document.getElementById('mode-select'),
-            difficultySelect: document.getElementById('difficulty-select'),
-            themeSelect: document.getElementById('theme-select'),
-            fontSelect: document.getElementById('font-select'),
-            timeSelect: document.getElementById('time-select'),
-            onlineTimeSelect: document.getElementById('online-time-select')
+            onlineTimeSelect: document.getElementById('online-time-select'),
+            btnCloseOnline: document.getElementById('btn-close-online'),
         };
     }
-
-    initBoardState() {
+    
+    initBoardArray() {
         this.board = Array(this.boardSize).fill(null).map(() => Array(this.boardSize).fill(null));
-        this.moveHistory = [];
-        this.currentTurn = 'X';
+    }
+    
+    startNewGame() {
         this.isGameOver = false;
-        this.winner = null;
-        this.winningLine = null;
+        this.currentTurn = 'X';
+        this.moveHistory = [];
+        this.usedSwapCard = { X: false, O: false };
+        this.hasUsedSwapCard = false;
+        this.hasUsedSwapCard = false;
+        this.boardSize = 25;
+        this.rules.size = 25;
+        if (this.ai) this.ai.rules.size = 25;
         this.lastMove = null;
-        this.resetTimer();
-        this.hideRuleAlert();
+        
+        this.initBoardArray();
+        this.renderBoardGrid();
+        this.dom.tabMoves.innerHTML = '';
+        
+        this.updateUI();
+        this.startTimer();
+        
+        if (this.gameMode === 'ai' && this.getMyPiece() === 'O') {
+            this.makeAIMove();
+        }
+    }
+    
+    getMyPiece() {
+        if (this.gameMode === 'online' && this.onlineManager) {
+            return this.onlineManager.myPiece;
+        }
+        return 'X'; // AI mode defaults to X
+    }
+    
+    updateUI() {
+        if (!this.dom.slot1) return;
+        
+        const myPiece = this.getMyPiece();
+        
+        const hand1 = document.getElementById('hand-1');
+        const hand2 = document.getElementById('hand-2');
+        if (hand1 && hand2) {
+            if (myPiece === 'X') {
+                hand1.style.order = 2; // My card at bottom
+                hand2.style.order = 1; // Opponent at top
+            } else if (myPiece === 'O') {
+                hand1.style.order = 1; // Opponent at top
+                hand2.style.order = 2; // My card at bottom
+            } else {
+                hand1.style.order = 1;
+                hand2.style.order = 2;
+            }
+        }
+        
+        if (this.gameMode === 'online' && this.onlineManager) {
+            const seats = this.onlineManager.seats || { X: null, O: null };
+            
+            // Middle board sit button
+            if (myPiece === 'spectator' && (!seats['X'] || !seats['O'])) {
+                this.dom.btnSitBoard.style.display = 'block';
+            } else {
+                this.dom.btnSitBoard.style.display = 'none';
+            }
+            
+            // Slot 1 (X)
+            if (seats['X']) {
+                this.dom.btnSit1.style.display = 'none';
+                this.dom.name1.style.display = 'block';
+                this.dom.name1.textContent = (myPiece === 'X') ? 'Bạn' : 'Đối thủ';
+                this.dom.card1.style.display = 'block';
+                if (this.usedSwapCard['X']) this.dom.card1.classList.add('used');
+                else this.dom.card1.classList.remove('used');
+            } else {
+                this.dom.btnSit1.style.display = 'block';
+                this.dom.name1.style.display = 'none';
+                this.dom.card1.style.display = 'none';
+            }
+            
+            // Slot 2 (O)
+            if (seats['O']) {
+                this.dom.btnSit2.style.display = 'none';
+                this.dom.name2.style.display = 'block';
+                this.dom.name2.textContent = (myPiece === 'O') ? 'Bạn' : 'Đối thủ';
+                this.dom.card2.style.display = 'block';
+                if (this.usedSwapCard['O']) this.dom.card2.classList.add('used');
+                else this.dom.card2.classList.remove('used');
+            } else {
+                this.dom.btnSit2.style.display = 'block';
+                this.dom.name2.style.display = 'none';
+                this.dom.card2.style.display = 'none';
+            }
+            
+        } else {
+            // AI Mode
+            if (myPiece === 'spectator') {
+                this.dom.btnSitBoard.style.display = 'block';
+                this.dom.btnSit1.style.display = 'block';
+                this.dom.btnSit2.style.display = 'block';
+                this.dom.name1.style.display = 'none';
+                this.dom.name2.style.display = 'none';
+            } else {
+                this.dom.btnSitBoard.style.display = 'none';
+                
+                this.dom.btnSit1.style.display = 'none';
+                this.dom.name1.style.display = 'block';
+                this.dom.name1.textContent = myPiece === 'X' ? 'Bạn' : 'Máy (AI)';
+                this.dom.card1.style.display = 'block';
+                if (this.usedSwapCard && this.usedSwapCard['X']) this.dom.card1.classList.add('used');
+                else this.dom.card1.classList.remove('used');
+                
+                this.dom.btnSit2.style.display = 'none';
+                this.dom.name2.style.display = 'block';
+                this.dom.name2.textContent = myPiece === 'O' ? 'Bạn' : 'Máy (AI)';
+                this.dom.card2.style.display = 'block';
+                if (this.usedSwapCard && this.usedSwapCard['O']) this.dom.card2.classList.add('used');
+                else this.dom.card2.classList.remove('used');
+            }
+        }
+        
+        if (this.onlineManager && this.onlineManager.roomCode) {
+            this.dom.roomTitle.textContent = "bàn " + this.onlineManager.roomCode;
+            this.dom.roomTime.textContent = this.turnTimeLimit ? this.turnTimeLimit + "s" : "∞";
+        } else {
+            this.dom.roomTitle.textContent = "Chơi với Máy (AI)";
+        }
+    }
+    
+    bindEvents() {
+        if (this.dom.btnSitBoard) this.dom.btnSitBoard.addEventListener('click', () => this.handleSit('X'));
+        if (this.dom.btnSit1) this.dom.btnSit1.addEventListener('click', () => this.handleSit('X'));
+        if (this.dom.btnSit2) this.dom.btnSit2.addEventListener('click', () => this.handleSit('O'));
+        if (this.dom.card1) this.dom.card1.addEventListener('click', () => this.handleSwapCard('X'));
+        if (this.dom.card2) this.dom.card2.addEventListener('click', () => this.handleSwapCard('O'));
+
+        if (this.dom.btnOnline) this.dom.btnOnline.addEventListener('click', () => this.dom.onlineModal.style.display = 'flex');
+        if (this.dom.btnCloseOnline) this.dom.btnCloseOnline.addEventListener('click', () => this.dom.onlineModal.style.display = 'none');
+        
+        if (this.dom.btnCreateRoom) {
+            this.dom.btnCreateRoom.addEventListener('click', () => {
+                this.dom.onlineModal.style.display = 'none';
+                this.gameMode = 'online';
+                const timeStr = this.dom.onlineTimeSelect ? this.dom.onlineTimeSelect.value : "30";
+                this.turnTimeLimit = parseInt(timeStr) || 30;
+                
+                this.startNewGame();
+                
+                this.onlineManager = new OnlineManager(this);
+                this.onlineManager.createRoom(this.turnTimeLimit, (roomCode) => {
+                    this.addChatLog('Đã tạo phòng: ' + roomCode, true);
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('room', roomCode);
+                    window.history.pushState({}, '', url);
+                    this.updateUI();
+                });
+                this.addChatLog('Đang tạo phòng...', true);
+            });
+        }
+        
+        if (this.dom.btnJoinRoom) {
+            this.dom.btnJoinRoom.addEventListener('click', () => {
+                const code = this.dom.inputJoinCode.value.trim().toUpperCase();
+                if (code) {
+                    this.dom.onlineModal.style.display = 'none';
+                    this.gameMode = 'online';
+                    this.onlineManager = new OnlineManager(this);
+                    this.onlineManager.joinRoom(code, () => {
+                        this.addChatLog('Đã kết nối thành công!', true);
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('room', code);
+                        window.history.pushState({}, '', url);
+                    }, () => {
+                        this.addChatLog('Lỗi kết nối hoặc phòng không tồn tại.', true);
+                    });
+                    this.addChatLog('Đang kết nối phòng ' + code + '...', true);
+                }
+            });
+        }
+
+        if (this.dom.tabBtns) {
+            this.dom.tabBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    this.dom.tabBtns.forEach(b => b.classList.remove('active'));
+                    this.dom.tabPanes.forEach(p => p.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+                });
+            });
+        }
+
+        if (this.dom.chatInput) {
+            this.dom.chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const text = e.target.value.trim();
+                    if (text) {
+                        if (this.onlineManager && this.onlineManager.isConnected) {
+                            this.onlineManager.sendChat(text);
+                            this.receiveOnlineChat(text, this.onlineManager.myPiece);
+                        } else {
+                            this.receiveOnlineChat(text, 'Bạn');
+                        }
+                        e.target.value = '';
+                    }
+                }
+            });
+        }
+
+        if (this.dom.btnNewGame) this.dom.btnNewGame.addEventListener('click', () => {
+            if (this.gameMode === 'online') {
+                if (this.onlineManager) this.onlineManager.sendNewGame();
+            } else {
+                this.startNewGame();
+            }
+        });
+        
+        if (this.dom.btnUndo) this.dom.btnUndo.addEventListener('click', () => this.handleUndo());
+        if (this.dom.btnResign) this.dom.btnResign.addEventListener('click', () => this.handleResign());
+        if (this.dom.btnDraw) this.dom.btnDraw.addEventListener('click', () => this.handleDraw());
+        
+
+        if (this.dom.boardContainer) {
+            this.dom.boardContainer.addEventListener('wheel', (e) => {
+                
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.05 : 0.05;
+                this.handleZoom(delta);
+            });
+            
+            let isDragging = false;
+            let startX, startY;
+            this.dom.boardContainer.addEventListener('mousedown', (e) => {
+                
+                if (e.button === 0 && this.zoomLevel === 1.0 && this.boardSize === 15) return; 
+                isDragging = true;
+                this.dom.boardContainer.style.cursor = 'grabbing';
+                this.dom.boardContainer.style.transition = 'none';
+                startX = e.clientX - this.panX;
+                startY = e.clientY - this.panY;
+            });
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging ) return;
+                this.panX = e.clientX - startX;
+                this.panY = e.clientY - startY;
+                this.update2DTransform();
+            });
+            window.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    this.dom.boardContainer.style.cursor = 'pointer';
+                    this.dom.boardContainer.style.transition = 'transform 0.2s ease-out';
+                }
+            });
+        }
+    }
+    
+    update2DTransform() {
+        if (!this.dom.boardContainer) return;
+        this.dom.boardContainer.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoomLevel})`;
+        this.dom.boardContainer.style.transformOrigin = 'center center';
     }
 
-    /**
-     * Render the 15x15 Goban grid with coordinates and Hoshi points
-     */
+    handleZoom(delta) {
+        this.zoomLevel += delta;
+        this.zoomLevel = Math.max(0.4, Math.min(this.zoomLevel, 3.0));
+        this.update2DTransform();
+    }
+
+    handleSwapCard(color) {
+        if (this.isGameOver) return;
+        if (this.getMyPiece() !== color) return;
+        if (this.hasUsedSwapCard) return; // Strict local lock
+        if (this.usedSwapCard[color]) return;
+        if (this.currentTurn !== color) {
+            this.addChatLog('Chỉ được dùng bài khi đến lượt của bạn!', true);
+            return;
+        }
+        
+        if (this.gameMode === 'online') {
+            if (this.onlineManager) {
+                // Lock locally immediately to prevent spam clicking
+                this.hasUsedSwapCard = true;
+                this.updateUI();
+                
+                this.onlineManager.sendSwapCard();
+            }
+        } else {
+            // AI Mode
+            this.usedSwapCard[color] = true;
+            this.addChatLog('Bạn đã dùng Bài Hoán Đổi!', true);
+            
+            // Swap AI and Player roles
+            if (this.getMyPiece() === 'X') {
+                this.addChatLog('Bạn giờ là Trắng (O), Máy là Đen (X).', true);
+                // In AI mode, getMyPiece() returns 'X' by default. We can't really swap easily without refactoring AI mode.
+                // But we can just make the AI move as X!
+                // Wait, if AI mode is hardcoded, let's just cheat:
+                this.addChatLog('Lưu ý: Chơi với máy chưa hỗ trợ hoán đổi 100%. Tính năng này chủ yếu dùng cho Online.', true);
+            }
+            this.updateUI();
+        }
+    }
+
+    playSwapAnimation(color) {
+        const card = color === 'X' ? this.dom.card1 : this.dom.card2;
+        if (card) {
+            card.classList.add('card-activating');
+            setTimeout(() => card.classList.remove('card-activating'), 1000);
+        }
+        
+        if (this.dom.boardWrapper) {
+            this.dom.boardWrapper.classList.add('board-swapping');
+            setTimeout(() => this.dom.boardWrapper.classList.remove('board-swapping'), 1000);
+        }
+        
+        if (this.getMyPiece() === 'spectator') {
+            this.addChatLog(`[HỆ THỐNG] Phe ${color === 'X' ? 'Đen' : 'Trắng'} vừa dùng Hoán Đổi! Bàn cờ xoay chuyển!`, true);
+        } else {
+            const who = (color !== this.getMyPiece()) ? 'BẠN' : 'ĐỐI THỦ';
+            const currentPieceName = this.getMyPiece() === 'X' ? 'ĐEN' : 'TRẮNG';
+            this.addChatLog(`[HỆ THỐNG] ${who} vừa dùng Hoán Đổi! Bàn cờ xoay chuyển! HIỆN TẠI QUÂN CỦA BẠN LÀ ${currentPieceName}.`, true);
+        }
+    }
+
+    handleSit(color) {
+        if (this.gameMode === 'ai') {
+            this.updateUI();
+            this.startNewGame();
+            return;
+        }
+        if (this.onlineManager) {
+            this.onlineManager.requestSeat(color);
+        }
+    }
+
+    addChatLog(msg, isSys=false) {
+        if (!this.dom.chatLog) return;
+        const div = document.createElement('div');
+        if (isSys) div.className = 'chat-sys';
+        div.textContent = msg;
+        this.dom.chatLog.appendChild(div);
+        this.dom.chatLog.scrollTop = this.dom.chatLog.scrollHeight;
+    }
+    
+    receiveOnlineChat(text, sender) {
+        const prefix = sender === 'X' ? '[Đen]' : (sender === 'O' ? '[Trắng]' : sender);
+        this.addChatLog(prefix + ': ' + text);
+    }
+    
     renderBoardGrid() {
         if (!this.dom.boardContainer) return;
         this.dom.boardContainer.innerHTML = '';
@@ -132,702 +454,326 @@ class CaroGame {
         boardEl.style.gridTemplateColumns = `repeat(${this.boardSize}, 1fr)`;
         boardEl.style.gridTemplateRows = `repeat(${this.boardSize}, 1fr)`;
 
-        // Traditional Hoshi (Star) points for 15x15 board:
-        // (3,3), (3,11), (7,7), (11,3), (11,11)
-        const hoshiPoints = new Set([
-            '3,3', '3,11', '7,7', '11,3', '11,11'
-        ]);
-
         for (let r = 0; r < this.boardSize; r++) {
             for (let c = 0; c < this.boardSize; c++) {
                 const cell = document.createElement('div');
                 cell.className = 'board-cell';
-                cell.dataset.row = r;
-                cell.dataset.col = c;
+                
+                if (r === 0) cell.classList.add('edge-top');
+                if (r === this.boardSize - 1) cell.classList.add('edge-bottom');
+                if (c === 0) cell.classList.add('edge-left');
+                if (c === this.boardSize - 1) cell.classList.add('edge-right');
 
-                // Add star point marker if applicable
-                if (hoshiPoints.has(`${r},${c}`)) {
-                    const hoshi = document.createElement('div');
-                    hoshi.className = 'hoshi-point';
-                    cell.appendChild(hoshi);
-                }
-
-                // Cell click
-                cell.addEventListener('click', (e) => this.handleCellClick(r, c));
-
-                // Hover ghost stone preview
-                cell.addEventListener('mouseenter', () => this.handleCellHover(r, c, cell));
-                cell.addEventListener('mouseleave', () => this.handleCellLeave(cell));
-
+                cell.addEventListener('click', () => this.handleCellClick(r, c));
                 boardEl.appendChild(cell);
             }
         }
 
         this.dom.boardContainer.appendChild(boardEl);
-        this.renderCoordinateLabels();
     }
-
-    renderCoordinateLabels() {
-        const topLabels = document.getElementById('board-coords-top');
-        const leftLabels = document.getElementById('board-coords-left');
-        if (!topLabels || !leftLabels) return;
-
-        topLabels.innerHTML = '';
-        leftLabels.innerHTML = '';
-
-        // Columns: A to O (15 columns)
-        const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O'];
-        for (let i = 0; i < this.boardSize; i++) {
-            const colLabel = document.createElement('span');
-            colLabel.textContent = letters[i] || (i + 1);
-            topLabels.appendChild(colLabel);
-
-            const rowLabel = document.createElement('span');
-            rowLabel.textContent = this.boardSize - i;
-            leftLabels.appendChild(rowLabel);
-        }
+    
+    getCellElement(r, c) {
+        if (!this.dom.boardContainer) return null;
+        const grid = this.dom.boardContainer.querySelector('.board-grid');
+        if (!grid) return null;
+        const index = r * this.boardSize + c;
+        return grid.children[index];
     }
-
-    getCoordLabel(r, c) {
-        const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O'];
-        const colLetter = letters[c] || (c + 1);
-        const rowNumber = this.boardSize - r;
-        return `${colLetter}${rowNumber}`;
-    }
-
-    bindEvents() {
-        // Mode & Theme controls
-        if (this.dom.modeSelect) {
-            this.dom.modeSelect.addEventListener('change', (e) => {
-                this.setGameMode(e.target.value);
-            });
-        }
-
-        if (this.dom.difficultySelect) {
-            this.dom.difficultySelect.addEventListener('change', (e) => {
-                this.aiDifficulty = e.target.value;
-            });
-        }
-
-        if (this.dom.themeSelect) {
-            this.dom.themeSelect.addEventListener('change', (e) => {
-                this.setBoardTheme(e.target.value);
-            });
-        }
-
-        if (this.dom.fontSelect) {
-            const savedFont = localStorage.getItem('caro_font') || 'vietnam';
-            this.dom.fontSelect.value = savedFont;
-            this.setFontStyle(savedFont);
-
-            this.dom.fontSelect.addEventListener('change', (e) => {
-                this.setFontStyle(e.target.value);
-            });
-        }
-
-        // Time limit controls
-        const savedTime = localStorage.getItem('caro_time_limit');
-        if (savedTime !== null) {
-            this.turnTimeLimit = parseInt(savedTime, 10);
-        }
-        if (this.dom.timeSelect) {
-            this.dom.timeSelect.value = this.turnTimeLimit;
-            this.dom.timeSelect.addEventListener('change', (e) => {
-                const val = parseInt(e.target.value, 10);
-                this.setTimeLimit(val);
-            });
-        }
-        if (this.dom.onlineTimeSelect) {
-            this.dom.onlineTimeSelect.value = this.turnTimeLimit;
-            this.dom.onlineTimeSelect.addEventListener('change', (e) => {
-                const val = parseInt(e.target.value, 10);
-                this.setTimeLimit(val);
-            });
-        }
-
-        // Action buttons
-        if (this.dom.pieceSelect) {
-            this.dom.pieceSelect.addEventListener('change', (e) => {
-                if (this.caro3D) {
-                    this.caro3D.setPieceStyle(e.target.value);
-                }
-            });
+    
+    renderStone(r, c, player, isNew = false) {
+        const cell = this.getCellElement(r, c);
+        if (!cell) return;
+        
+        if (isNew) {
+            document.querySelectorAll('.stone.last-move').forEach(el => el.classList.remove('last-move'));
         }
         
-        if (this.dom.btnToggle3D) {
-            this.dom.btnToggle3D.addEventListener('click', () => {
-                if (this.caro3D) {
-                    this.caro3D.toggleMode();
-                }
-            });
-        }
-
-        if (this.dom.btnNewGame) {
-            this.dom.btnNewGame.addEventListener('click', () => {
-                const createNewOnline = () => {
-                    this.startNewGame();
-                    this.setGameMode('online');
-                    this.handleCreateOnlineRoom();
-                };
-
-                if (this.moveHistory.length > 0 && !this.isGameOver) {
-                    this.showConfirmModal('Tạo phòng mới?', 'Ván đấu hiện tại sẽ kết thúc và tạo phòng thi đấu mới.', () => {
-                        createNewOnline();
-                    });
-                } else {
-                    createNewOnline();
-                }
-            });
-        }
-
-        if (this.dom.btnUndo) {
-            this.dom.btnUndo.addEventListener('click', () => this.handleUndo());
-        }
-
-        if (this.dom.btnHint) {
-            this.dom.btnHint.addEventListener('click', () => this.showHint());
-        }
-
-        if (this.dom.btnAudio) {
-            this.dom.btnAudio.addEventListener('click', () => {
-                const muted = window.soundEngine.toggleMute();
-                this.updateAudioButton(muted);
-            });
-            this.updateAudioButton(window.soundEngine.isMuted());
-        }
-
-        // Modal triggers
-        if (this.dom.btnRulesModal) {
-            this.dom.btnRulesModal.addEventListener('click', () => this.openModal(this.dom.rulesModal));
-        }
-
-        if (this.dom.btnOnlineModal) {
-            this.dom.btnOnlineModal.addEventListener('click', () => this.openModal(this.dom.onlineModal));
-        }
-
-        // Close modal buttons
-        document.querySelectorAll('.modal-close-btn, .modal-backdrop').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const modal = e.target.closest('.modal-container');
-                if (modal) this.closeModal(modal);
-            });
-        });
-
-        // Online lobby buttons
-        if (this.dom.btnCreateRoom) {
-            this.dom.btnCreateRoom.addEventListener('click', () => this.handleCreateOnlineRoom());
-        }
-
-        if (this.dom.btnJoinRoom) {
-            this.dom.btnJoinRoom.addEventListener('click', () => this.handleJoinOnlineRoom());
-        }
-
-        if (this.dom.btnCopyLink) {
-            this.dom.btnCopyLink.addEventListener('click', () => this.copyInviteLink());
-        }
-
-        // Chat & Emotes
-        if (this.dom.btnSendChat) {
-            this.dom.btnSendChat.addEventListener('click', () => this.sendChatMessage());
-        }
-        if (this.dom.chatInput) {
-            this.dom.chatInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') this.sendChatMessage();
-            });
-        }
-
-        if (this.dom.avatarSelector) {
-            this.dom.avatarSelector.addEventListener('click', (e) => {
-                const btn = e.target.closest('.avatar-option');
-                if (btn) {
-                    this.dom.avatarSelector.querySelectorAll('.avatar-option').forEach(b => b.classList.remove('selected'));
-                    btn.classList.add('selected');
-                    const emoji = btn.dataset.avatar;
-                    this.online.setAvatar(emoji);
-                }
-            });
-        }
-
-        if (this.dom.emoteBar) {
-            this.dom.emoteBar.addEventListener('click', (e) => {
-                const btn = e.target.closest('.emote-btn');
-                if (btn) {
-                    const emoji = btn.dataset.emoji;
-                    this.sendEmote(emoji);
-                }
-            });
-        }
-    }
-
-    checkURLParams() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const room = urlParams.get('room');
-        if (room) {
-            this.setGameMode('online');
-            this.handleJoinOnlineRoom(room);
-        }
-    }
-
-    setBoardTheme(themeName) {
-        const appContainer = document.querySelector('.app-container');
-        if (!appContainer) return;
-        appContainer.classList.remove('theme-wood', 'theme-slate', 'theme-jade');
-        appContainer.classList.add(`theme-${themeName}`);
+        const stone = document.createElement('div');
+        stone.className = `stone stone-${player.toLowerCase()}`;
         
-        if (this.caro3D) {
-            this.caro3D.setTheme(themeName);
+        cell.innerHTML = '';
+        cell.appendChild(stone);
+        
+        if (isNew) {
+            stone.classList.add('last-move');
         }
     }
-
-    setFontStyle(fontName) {
-        document.body.classList.remove('font-vietnam', 'font-playfair', 'font-jakarta');
-        document.body.classList.add(`font-${fontName}`);
-        localStorage.setItem('caro_font', fontName);
-    }
-
-    setTimeLimit(seconds) {
-        this.turnTimeLimit = seconds;
-        this.turnTimeLeft = seconds;
-        localStorage.setItem('caro_time_limit', seconds);
-        if (this.dom.timeSelect) this.dom.timeSelect.value = seconds;
-        if (this.dom.onlineTimeSelect) this.dom.onlineTimeSelect.value = seconds;
-        this.updateTimerDisplay();
-        if (!this.isGameOver && this.moveHistory.length > 0) {
-            this.startTimer();
-
-            if (this.gameMode !== 'online') {
-                this.receiveOnlineAvatar('X', '✕');
-                this.receiveOnlineAvatar('O', this.gameMode === 'ai' ? '🤖' : '○');
-            }
-        }
-    }
-
-    setGameMode(mode) {
-        this.gameMode = mode;
-        if (this.dom.modeSelect) this.dom.modeSelect.value = mode;
-
-        const diffContainer = document.getElementById('difficulty-container');
-        if (diffContainer) {
-            diffContainer.style.display = mode === 'ai' ? 'flex' : 'none';
-        }
-
-        const onlinePanel = this.dom.onlineControlsPanel;
-        const sidebar = document.querySelector('.sidebar-column');
-        if (onlinePanel) {
-            onlinePanel.style.display = mode === 'online' ? 'block' : 'none';
-        }
-        if (sidebar) {
-            sidebar.style.display = mode === 'online' ? 'flex' : 'none';
-        }
-
-        const hintBtn = this.dom.btnHint;
-        if (hintBtn) {
-            hintBtn.style.display = mode === 'online' ? 'none' : 'inline-flex';
-        }
-
-        // Update player labels
-        this.updatePlayerLabels();
-
-        if (mode === 'online') {
-            // No longer opening modal, everything is seamless
-
-        } else {
-            this.online.disconnect();
-            this.startNewGame();
-        }
-    }
-
-    updatePlayerLabels() {
-        const p1Name = document.getElementById('player-x-name');
-        const p2Name = document.getElementById('player-o-name');
-        const p1Sub = document.getElementById('player-x-sub');
-        const p2Sub = document.getElementById('player-o-sub');
-
-        if (this.gameMode === 'ai') {
-            if (p1Name) p1Name.textContent = 'Bạn (X)';
-            if (p1Sub) p1Sub.textContent = 'Đi trước';
-            if (p2Name) p2Name.textContent = 'Trí tuệ nhân tạo (AI)';
-            if (p2Sub) p2Sub.textContent = `Cấp độ: ${this.getDifficultyName()}`;
-        } else if (this.gameMode === 'local') {
-            if (p1Name) p1Name.textContent = 'Người chơi 1 (X)';
-            if (p1Sub) p1Sub.textContent = 'Quân đen / đỏ';
-            if (p2Name) p2Name.textContent = 'Người chơi 2 (O)';
-            if (p2Sub) p2Sub.textContent = 'Quân trắng / lam';
-        } else if (this.gameMode === 'online') {
-            const myPiece = this.online.myPiece;
-            if (myPiece === 'spectator') {
-                if (p1Name) p1Name.textContent = 'Chủ phòng (X)';
-                if (p2Name) p2Name.textContent = 'Người chơi (O)';
-                if (p1Sub) p1Sub.textContent = 'Đi trước';
-                if (p2Sub) p2Sub.textContent = 'Đi sau';
-            } else
-                if (p1Name) p1Name.textContent = myPiece === 'X' ? 'Bạn (X - Chủ phòng)' : 'Đối thủ (X)';
-            if (p2Name) p2Name.textContent = myPiece === 'O' ? 'Bạn (O - Khách)' : 'Đối thủ (O)';
-            if (p1Sub) p1Sub.textContent = 'Đi trước';
-            if (p2Sub) p2Sub.textContent = 'Đi sau';
-        }
-    }
-
-    getDifficultyName() {
-        if (this.aiDifficulty === 'easy') return 'Tập sự';
-        if (this.aiDifficulty === 'hard') return 'Đại kiện tướng';
-        return 'Chiến lược';
-    }
-
-    startNewGame() {
-        this.initBoardState();
-        this.renderBoardGrid();
-        this.updateUI();
-        this.startTimer();
-        if (this.caro3D) {
-            this.caro3D.clearBoard();
-        }
-    }
-
-    handleCellHover(r, c, cell) {
-        if (this.isGameOver || this.board[r][c] !== null) return;
-        if (this.gameMode === 'online' && this.currentTurn !== this.online.myPiece) return;
-        if (this.gameMode === 'ai' && this.currentTurn !== 'X') return;
-
-        cell.classList.add(`ghost-${this.currentTurn.toLowerCase()}`);
-        if (!cell.querySelector('.ghost-preview')) {
-            const preview = document.createElement('div');
-            preview.className = 'ghost-preview';
-            cell.appendChild(preview);
-        }
-    }
-
-    handleCellLeave(cell) {
-        cell.classList.remove('ghost-x', 'ghost-o');
-        const preview = cell.querySelector('.ghost-preview');
-        if (preview) {
-            preview.remove();
-        }
-    }
-
+    
     handleCellClick(r, c) {
         if (this.isGameOver) return;
+        if (this.getMyPiece() === 'spectator') return;
+        
+        if (this.currentTurn !== this.getMyPiece()) return;
+        
         if (this.board[r][c] !== null) return;
-
-        // Check turn permissions
+        
+        const moveColor = this.currentTurn;
+        this.makeMove(r, c, moveColor);
+        
         if (this.gameMode === 'online') {
-            if (!this.online.isConnected) {
-                this.showToast('Chưa kết nối với đối thủ!');
-                return;
+            this.onlineManager.sendMove(r, c, moveColor);
+        } else {
+            if (!this.isGameOver) {
+                setTimeout(() => this.makeAIMove(), 300);
             }
-            if (this.online.myPiece === 'spectator') {
-                this.showToast('Khán giả không thể đặt quân!');
-                return;
-            }
-            if (this.currentTurn !== this.online.myPiece) {
-                this.showToast('Đang đợi đối thủ đi nước...');
-                return;
-            }
-        } else if (this.gameMode === 'ai') {
-            if (this.currentTurn !== 'X') return;
-        }
-
-        const playerMakingMove = this.currentTurn;
-        this.makeMove(r, c, playerMakingMove);
-
-        // If online mode, transmit move to peer
-        if (this.gameMode === 'online') {
-            this.online.sendMove(r, c, playerMakingMove);
-        }
-
-        // If AI mode and game not over, trigger AI response
-        if (this.gameMode === 'ai' && !this.isGameOver && this.currentTurn === 'O') {
-            this.triggerAIMove();
         }
     }
-
-    /**
-     * Executes a move on the board and verifies win/double-block states
-     */
+    
+    makeAIMove() {
+        if (this.isGameOver) return;
+        const bestMove = this.ai.findBestMove(this.board, 'O');
+        if (bestMove) {
+            this.makeMove(bestMove.r, bestMove.c, 'O');
+        }
+    }
+    
     makeMove(r, c, player) {
         this.board[r][c] = player;
         this.lastMove = { r, c, player };
-        this.moveHistory.push({
-            r,
-            c,
-            player,
-            time: new Date().toLocaleTimeString(),
-            label: this.getCoordLabel(r, c)
-        });
-
-        // Play tactile stone placement sound
-        window.soundEngine.playStoneSnap(player);
-
-        // Update DOM cell with animated 3D stone
-        this.renderStone(r, c, player, true);
-        if (this.caro3D && this.caro3D.enabled) {
-            this.caro3D.addStone(r, c, player);
+        this.moveHistory.push(this.lastMove);
+        
+        const coords = `${String.fromCharCode(65+c)}${this.boardSize - r}`;
+        const color = player === 'X' ? 'Đen' : 'Trắng';
+        const moveDiv = document.createElement('div');
+        moveDiv.textContent = `${this.moveHistory.length}. ${color} - ${coords}`;
+        if (this.dom.tabMoves) {
+            this.dom.tabMoves.appendChild(moveDiv);
+            this.dom.tabMoves.scrollTop = this.dom.tabMoves.scrollHeight;
         }
-
-        // Clear any previous hint
-        this.clearHint();
-
-        // Check Caro Rules: 5-in-a-row + "Không được chặn 2 đầu"
+        
+        this.renderStone(r, c, player, true);
+        
         const result = this.rules.checkMove(this.board, r, c, player);
-
         if (result.isWin) {
             this.handleWin(player, result.winningLine);
             return;
         }
-
+        
         if (result.doubleBlocked) {
-            // Player reached 5 in a row, but BOTH ends are blocked by opponent!
-            // Highlight the blocked line and show educational rule notification
-            this.handleDoubleBlocked(result.doubleBlockedLines);
-        } else {
-            this.hideRuleAlert();
+            // Do not switch turn or anything special, just log
+            this.addChatLog(`* Cảnh báo: Chuỗi của ${color} bị chặn 2 đầu!`, true);
         }
-
-        if (result.isDraw) {
-            this.handleDraw();
-            return;
-        }
-
-        // Switch turn
+        
         this.currentTurn = player === 'X' ? 'O' : 'X';
-        this.resetTimer();
         this.startTimer();
-        this.updateUI();
     }
-
-    /**
-     * Render 3D stone with entrance animation and last-move indicator
-     */
-    renderStone(r, c, player, isNew = false) {
-        const cell = this.getCellElement(r, c);
-        if (!cell) return;
-
-        cell.classList.remove('ghost-x', 'ghost-o');
-
-        // Remove old last-move indicators
-        document.querySelectorAll('.board-cell.last-move').forEach(el => el.classList.remove('last-move'));
-
-        const stone = document.createElement('div');
-        stone.className = `stone stone-${player.toLowerCase()} ${isNew ? 'stone-drop-anim' : ''}`;
-
-        // Add specular light reflection element inside stone
-        const shine = document.createElement('div');
-        shine.className = 'stone-shine';
-        stone.appendChild(shine);
-
-        cell.innerHTML = '';
-        cell.appendChild(stone);
-        cell.classList.add('last-move', 'occupied');
-    }
-
-    getCellElement(r, c) {
-        return document.querySelector(`.board-cell[data-row="${r}"][data-col="${c}"]`);
-    }
-
-    /**
-     * Handler when 5 in a row is blocked at both ends (Vietnamese Caro standard)
-     */
-    handleDoubleBlocked(lines) {
-        window.soundEngine.playWarning();
-
-        // Flash amber warning outline on the blocked stones
-        lines.forEach(line => {
-            line.forEach(({ r, c }) => {
-                const cell = this.getCellElement(r, c);
-                if (cell) {
-                    cell.classList.add('double-blocked-pulse');
-                    setTimeout(() => cell.classList.remove('double-blocked-pulse'), 3000);
-                }
-            });
-        });
-
-        this.showRuleAlert('⚠️ Chuỗi 5 bị chặn cả 2 đầu bởi quân đối thủ! Theo Luật Cờ Caro Việt Nam: Chưa tính thắng, trận đấu tiếp tục!');
-    }
-
-    showRuleAlert(message) {
-        if (!this.dom.ruleAlertBanner) return;
-        if (this.dom.ruleAlertText) this.dom.ruleAlertText.textContent = message;
-        this.dom.ruleAlertBanner.classList.add('active');
-    }
-
-    hideRuleAlert() {
-        if (this.dom.ruleAlertBanner) {
-            this.dom.ruleAlertBanner.classList.remove('active');
-        }
-    }
-
-    handleWin(player, winningLine) {
+    
+    handleWin(winner, winningLine) {
         this.isGameOver = true;
-        this.winner = player;
-        this.winningLine = winningLine;
         this.stopTimer();
-
-        // Update score
-        this.score[player]++;
-        this.updateScoreDisplay();
-
-        // Play victory sound
-        window.soundEngine.playVictory();
-
-        // Draw luminous win trace on winning stones
+        const msg = winner === 'X' ? 'Đen thắng!' : 'Trắng thắng!';
+        this.addChatLog(`*** ${msg} ***`, true);
+        
         if (winningLine && winningLine.length > 0) {
-            if (this.caro3D && this.caro3D.enabled) {
-                this.caro3D.highlightWin(winningLine);
-            }
-            winningLine.forEach(({ r, c }, idx) => {
-                const cell = this.getCellElement(r, c);
+            winningLine.forEach(coord => {
+                const cell = this.getCellElement(coord.r, coord.c);
                 if (cell) {
-                    setTimeout(() => {
-                        cell.classList.add('winning-stone');
-                    }, idx * 60);
+                    const stone = cell.querySelector('.stone');
+                    if (stone) {
+                        stone.classList.add('winning-stone');
+                    }
                 }
             });
         }
+    }
+    
+    checkExpansion(r, c) {
+        if (r <= 2 || r >= this.boardSize - 3 || c <= 2 || c >= this.boardSize - 3) {
+            this.expandBoard(5);
+        }
+    }
+    
+    expandBoard(amount) {
+        const oldSize = this.boardSize;
+        const newSize = oldSize + amount * 2;
+        
+        const newBoard = Array(newSize).fill(null).map(() => Array(newSize).fill(null));
+        
+        for (let r = 0; r < oldSize; r++) {
+            for (let c = 0; c < oldSize; c++) {
+                newBoard[r + amount][c + amount] = this.board[r][c];
+            }
+        }
+        
+        for (let move of this.moveHistory) {
+            move.r += amount;
+            move.c += amount;
+        }
+        // DO NOT modify this.lastMove again because it's a reference to the last element in this.moveHistory!
+        
+        this.board = newBoard;
+        this.boardSize = newSize;
+        this.rules.size = newSize;
+        if (this.ai) this.ai.rules.size = newSize;
+        
+        this.renderBoardGrid();
+        for (let r = 0; r < this.boardSize; r++) {
+            for (let c = 0; c < this.boardSize; c++) {
+                if (this.board[r][c]) {
+                    this.renderStone(r, c, this.board[r][c], false);
+                }
+            }
+        }
+        if (this.lastMove) {
+            const cell = this.getCellElement(this.lastMove.r, this.lastMove.c);
+            if (cell) cell.querySelector('.stone').classList.add('last-move');
+        }
+    }
+    
+    handleUndo() {
+        if (this.isGameOver) return;
+        if (this.gameMode === 'online') {
+            if (this.onlineManager && this.getMyPiece() !== 'spectator') {
+                this.addChatLog('Đã gửi yêu cầu đánh lại...', true);
+                this.onlineManager.sendUndoRequest();
+            }
+        } else {
+            if (this.moveHistory.length >= 2) {
+                this.undoMove(2); // pop AI and Player
+            }
+        }
+    }
 
-        // Show game over modal after slight dramatic delay
-        setTimeout(() => {
-            this.showGameOverModal(player);
-        }, 1200);
+    handleResign() {
+        if (this.isGameOver) return;
+        if (this.gameMode === 'online') {
+            if (this.onlineManager && this.getMyPiece() !== 'spectator') {
+                this.onlineManager.sendResign();
+                this.isGameOver = true;
+                const winner = this.getMyPiece() === 'X' ? 'O' : 'X';
+                this.handleWin(winner, []);
+            }
+        } else {
+            this.isGameOver = true;
+            this.handleWin('O', []);
+        }
     }
 
     handleDraw() {
-        this.isGameOver = true;
-        this.winner = 'TIE';
-        this.stopTimer();
-        this.score.ties++;
-        this.updateScoreDisplay();
-
-        setTimeout(() => {
-            this.showGameOverModal('TIE');
-        }, 800);
-    }
-
-    triggerAIMove() {
-        // Show subtle thinking indicator
-        const playerOCard = this.dom.playerOCard;
-        if (playerOCard) playerOCard.classList.add('ai-thinking');
-
-        // Human-like response latency (350ms - 550ms)
-        const delay = Math.floor(350 + Math.random() * 200);
-
-        setTimeout(() => {
-            if (this.isGameOver) return;
-            const bestMove = this.ai.findBestMove(this.board, this.aiDifficulty);
-            if (playerOCard) playerOCard.classList.remove('ai-thinking');
-
-            if (bestMove) {
-                this.makeMove(bestMove.r, bestMove.c, 'O');
-            }
-        }, delay);
-    }
-
-    handleUndo() {
         if (this.isGameOver) return;
-        if (this.moveHistory.length === 0) return;
-
         if (this.gameMode === 'online') {
-            this.showToast('Đang gửi yêu cầu xin đi lại...');
-            this.online.sendUndoRequest();
-            return;
-        }
-
-        // In AI mode, undo 2 moves (both AI and player) so it's back to player's turn
-        if (this.gameMode === 'ai') {
-            if (this.moveHistory.length >= 2) {
-                this.undoSingleMove();
-                this.undoSingleMove();
-            } else if (this.moveHistory.length === 1) {
-                this.undoSingleMove();
+            if (this.onlineManager && this.getMyPiece() !== 'spectator') {
+                this.addChatLog('Đã gửi yêu cầu cầu hoà...', true);
+                this.onlineManager.sendDrawRequest();
             }
-        } else {
-            // Local 2-player mode: undo 1 move
-            this.undoSingleMove();
         }
+    }
 
+    undoMove(count = 1) {
+        for (let i = 0; i < count; i++) {
+            if (this.moveHistory.length === 0) break;
+            const move = this.moveHistory.pop();
+            this.board[move.r][move.c] = null;
+        }
+        this.lastMove = this.moveHistory.length > 0 ? this.moveHistory[this.moveHistory.length - 1] : null;
+        
+        this.renderBoardGrid();
+        for (let r = 0; r < this.boardSize; r++) {
+            for (let c = 0; c < this.boardSize; c++) {
+                if (this.board[r][c]) {
+                    this.renderStone(r, c, this.board[r][c], false);
+                }
+            }
+        }
+        if (this.lastMove) {
+            this.renderStone(this.lastMove.r, this.lastMove.c, this.lastMove.player, true);
+        }
+        
+        if (this.dom.tabMoves) {
+            this.dom.tabMoves.innerHTML = '';
+            this.moveHistory.forEach((m, idx) => {
+                const coords = `${String.fromCharCode(65+m.c)}${this.boardSize - m.r}`;
+                const color = m.player === 'X' ? 'Đen' : 'Trắng';
+                const moveDiv = document.createElement('div');
+                moveDiv.textContent = `${idx + 1}. ${color} - ${coords}`;
+                this.dom.tabMoves.appendChild(moveDiv);
+            });
+            this.dom.tabMoves.scrollTop = this.dom.tabMoves.scrollHeight;
+        }
+        
         this.currentTurn = this.moveHistory.length % 2 === 0 ? 'X' : 'O';
-        this.resetTimer();
-        this.startTimer();
+        this.isGameOver = false;
         this.updateUI();
     }
 
-    undoSingleMove() {
-        const last = this.moveHistory.pop();
-        if (!last) return;
-
-        this.board[last.r][last.c] = null;
-        if (this.caro3D) {
-            this.caro3D.removeStone(last.r, last.c);
-        }
-        const cell = this.getCellElement(last.r, last.c);
-        if (cell) {
-            cell.innerHTML = '';
-            cell.classList.remove('occupied', 'last-move', 'winning-stone', 'double-blocked-pulse');
-        }
-
-        // Highlight previous move if exists
-        const prev = this.moveHistory[this.moveHistory.length - 1];
-        if (prev) {
-            this.lastMove = prev;
-            const prevCell = this.getCellElement(prev.r, prev.c);
-            if (prevCell) prevCell.classList.add('last-move');
-        } else {
-            this.lastMove = null;
-        }
-    }
-
-    showHint() {
+    receiveOnlineUndoRequest() {
         if (this.isGameOver) return;
-        if (this.gameMode === 'ai' && this.currentTurn !== 'X') return;
-
-        const hintMove = this.ai.findBestMove(this.board, 'hard');
-        if (!hintMove) return;
-
-        this.clearHint();
-
-        const cell = this.getCellElement(hintMove.r, hintMove.c);
-        if (cell) {
-            const beacon = document.createElement('div');
-            beacon.className = 'hint-beacon';
-            cell.appendChild(beacon);
-            cell.classList.add('has-hint');
-
-            this.showToast(`💡 Gợi ý nước đi: ${this.getCoordLabel(hintMove.r, hintMove.c)}`);
+        if (confirm('Đối thủ muốn đánh lại 1 nước. Bạn có đồng ý không?')) {
+            this.onlineManager.sendUndoResponse(true);
+            this.undoMove(1);
+        } else {
+            this.onlineManager.sendUndoResponse(false);
         }
     }
 
-    clearHint() {
-        document.querySelectorAll('.hint-beacon').forEach(el => el.remove());
-        document.querySelectorAll('.has-hint').forEach(el => el.classList.remove('has-hint'));
+    receiveOnlineUndoResponse(accepted) {
+        if (accepted) {
+            this.addChatLog('Đối thủ đã đồng ý cho đánh lại.', true);
+            this.undoMove(1);
+        } else {
+            this.addChatLog('Đối thủ từ chối yêu cầu đánh lại.', true);
+        }
     }
 
+    receiveOnlineResign() {
+        if (this.isGameOver) return;
+        const myPiece = this.getMyPiece();
+        // The one who sent resign is the opponent
+        const winner = myPiece === 'spectator' ? 'X' : myPiece;
+        this.addChatLog('Đối thủ đã đầu hàng.', true);
+        this.handleWin(winner, []);
+    }
+
+    receiveOnlineDrawRequest() {
+        if (this.isGameOver) return;
+        if (confirm('Đối thủ muốn xin hoà. Bạn có đồng ý không?')) {
+            this.onlineManager.sendDrawResponse(true);
+            this.isGameOver = true;
+            this.addChatLog('*** VÁN CỜ HOÀ ***', true);
+            alert('Ván cờ hoà!');
+        } else {
+            this.onlineManager.sendDrawResponse(false);
+        }
+    }
+
+    receiveOnlineDrawResponse(accepted) {
+        if (accepted) {
+            this.isGameOver = true;
+            this.addChatLog('Đối thủ đã chấp nhận hoà.', true);
+            this.addChatLog('*** VÁN CỜ HOÀ ***', true);
+            alert('Ván cờ hoà!');
+        } else {
+            this.addChatLog('Đối thủ từ chối yêu cầu hoà.', true);
+        }
+    }
+    
     startTimer() {
         this.stopTimer();
         if (this.turnTimeLimit <= 0) {
-            this.updateTimerDisplay();
+            if (this.dom.timer1) this.dom.timer1.textContent = "0:00";
+            if (this.dom.timer2) this.dom.timer2.textContent = "0:00";
             return;
         }
 
-        this.turnTimeLeft = this.turnTimeLimit;
+        this.timeLeft = this.turnTimeLimit;
         this.updateTimerDisplay();
 
         this.timerInterval = setInterval(() => {
-            this.turnTimeLeft--;
+            this.timeLeft--;
             this.updateTimerDisplay();
 
-            if (this.turnTimeLeft <= 5 && this.turnTimeLeft > 0) {
-                window.soundEngine.playTick();
-            }
-
-            if (this.turnTimeLeft <= 0) {
+            if (this.timeLeft <= 0) {
                 this.stopTimer();
-                this.handleTimeout();
+                this.makeRandomMove();
             }
         }, 1000);
     }
-
-    resetTimer() {
-        this.turnTimeLeft = this.turnTimeLimit;
-        this.updateTimerDisplay();
+    
+    makeRandomMove() {
+        if (this.isGameOver) return;
+        // Just skip turn to simple
+        this.currentTurn = this.currentTurn === 'X' ? 'O' : 'X';
+        this.startTimer();
     }
 
     stopTimer() {
@@ -837,446 +783,65 @@ class CaroGame {
         }
     }
 
-    handleTimeout() {
-        // Player ran out of time
-        const loser = this.currentTurn;
-        const winner = loser === 'X' ? 'O' : 'X';
-        this.showToast(`⏱️ Hết giờ! ${loser === 'X' ? 'Quân X' : 'Quân O'} xử thua do hết thời gian.`);
-        this.handleWin(winner, null);
-    }
-
     updateTimerDisplay() {
-        if (!this.dom.timerDisplay || !this.dom.timerProgress) return;
-
-        if (this.turnTimeLimit <= 0) {
-            this.dom.timerDisplay.textContent = '♾️';
-            this.dom.timerProgress.style.width = '100%';
-            this.dom.timerProgress.classList.remove('urgent');
-            return;
-        }
-
-        this.dom.timerDisplay.textContent = `${this.turnTimeLeft}s`;
-
-        const percentage = Math.max(0, (this.turnTimeLeft / this.turnTimeLimit) * 100);
-        this.dom.timerProgress.style.width = `${percentage}%`;
-
-        if (this.turnTimeLeft <= 5) {
-            this.dom.timerProgress.classList.add('urgent');
-        } else {
-            this.dom.timerProgress.classList.remove('urgent');
-        }
-    }
-
-    updateScoreDisplay() {
-        if (this.dom.scoreX) this.dom.scoreX.textContent = this.score.X;
-        if (this.dom.scoreO) this.dom.scoreO.textContent = this.score.O;
-    }
-
-    updateUI() {
-        // Turn active card highlights
-        if (this.dom.playerXCard && this.dom.playerOCard) {
+        const mins = Math.floor(this.timeLeft / 60);
+        const secs = this.timeLeft % 60;
+        const text = `${mins}:${secs.toString().padStart(2, '0')}`;
+        
+        if (this.dom.timer1 && this.dom.timer2) {
             if (this.currentTurn === 'X') {
-                this.dom.playerXCard.classList.add('active-turn');
-                this.dom.playerOCard.classList.remove('active-turn');
+                this.dom.timer1.textContent = text;
+                this.dom.timer2.textContent = "0:00";
             } else {
-                this.dom.playerOCard.classList.add('active-turn');
-                this.dom.playerXCard.classList.remove('active-turn');
+                this.dom.timer1.textContent = "0:00";
+                this.dom.timer2.textContent = text;
             }
         }
-
-        // Turn status text
-        if (this.dom.turnIndicator) {
-            const turnName = this.currentTurn === 'X' ? 'Quân X (Đen/Đỏ)' : 'Quân O (Trắng/Lam)';
-            this.dom.turnIndicator.textContent = `Lượt đi: ${turnName}`;
-        }
-
-        // Move count badge
-        if (this.dom.moveCountBadge) {
-            this.dom.moveCountBadge.textContent = `${this.moveHistory.length} nước`;
-        }
-
-        // Render Move Log
-        this.renderMoveLog();
     }
-
-    renderMoveLog() {
-        if (!this.dom.moveLogList) return;
-        this.dom.moveLogList.innerHTML = '';
-
-        this.moveHistory.slice(-12).reverse().forEach((mv, idx) => {
-            const item = document.createElement('div');
-            item.className = 'move-log-item';
-            const moveNum = this.moveHistory.length - idx;
-            item.innerHTML = `
-                <span class="move-num">#${moveNum}</span>
-                <span class="move-player move-${mv.player.toLowerCase()}">${mv.player}</span>
-                <span class="move-coord">${mv.label}</span>
-                <span class="move-time">${mv.time}</span>
-            `;
-            this.dom.moveLogList.appendChild(item);
-        });
-    }
-
-    updateAudioButton(muted) {
-        if (!this.dom.btnAudio) return;
-        this.dom.btnAudio.innerHTML = muted ? '🔇 <span>Tắt âm</span>' : '🔊 <span>Bật âm</span>';
-    }
-
-    showToast(message, duration = 3000) {
-        const toast = document.createElement('div');
-        toast.className = 'game-toast';
-        toast.textContent = message;
-        document.body.appendChild(toast);
-
-        requestAnimationFrame(() => toast.classList.add('show'));
-
-        setTimeout(() => {
-            toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 400);
-        }, duration);
-    }
-
-    // Modal helpers
-    openModal(modal) {
-        if (modal) modal.classList.add('active');
-    }
-
-    closeModal(modal) {
-        if (modal) modal.classList.remove('active');
-    }
-
-    showGameOverModal(winner) {
-        const modal = this.dom.gameOverModal;
-        if (!modal) return;
-
-        const title = modal.querySelector('.modal-title');
-        const desc = modal.querySelector('.game-over-desc');
-        const stats = modal.querySelector('.game-over-stats');
-
-        if (winner === 'TIE') {
-            if (title) title.textContent = 'Trận Đấu Hòa!';
-            if (desc) desc.textContent = 'Bàn cờ đã đầy và cả hai bên đều thi đấu xuất sắc.';
-        } else {
-            const winnerName = this.gameMode === 'ai'
-                ? (winner === 'X' ? 'Bạn' : 'Máy (AI)')
-                : (winner === 'X' ? 'Người chơi 1 (X)' : 'Người chơi 2 (O)');
-            if (title) title.textContent = `🏆 ${winnerName} Chiến Thắng!`;
-            if (desc) desc.textContent = `Tạo thành chuỗi 5 quân liên tiếp hợp lệ (không bị đối thủ chặn 2 đầu).`;
-        }
-
-        if (stats) {
-            stats.innerHTML = `
-                <div class="stat-pill"><span>Tổng nước đi:</span> <strong>${this.moveHistory.length}</strong></div>
-                <div class="stat-pill"><span>Tỉ số X:</span> <strong>${this.score.X}</strong></div>
-                <div class="stat-pill"><span>Tỉ số O:</span> <strong>${this.score.O}</strong></div>
-            `;
-        }
-
-        const btnPlayAgain = modal.querySelector('.btn-play-again');
-        if (btnPlayAgain) {
-            btnPlayAgain.onclick = () => {
-                this.closeModal(modal);
-                this.startNewGame();
-                if (this.gameMode === 'online') {
-                    this.online.sendNewGame();
-                }
-            };
-        }
-
-        this.openModal(modal);
-    }
-
-    showConfirmModal(title, message, onConfirm) {
-        const modal = this.dom.confirmModal;
-        if (!modal) {
-            if (confirm(`${title}\n${message}`)) onConfirm();
-            return;
-        }
-
-        modal.querySelector('.confirm-title').textContent = title;
-        modal.querySelector('.confirm-message').textContent = message;
-
-        const btnConfirm = modal.querySelector('.btn-modal-confirm');
-        const btnCancel = modal.querySelector('.btn-modal-cancel');
-
-        btnConfirm.onclick = () => {
-            this.closeModal(modal);
-            onConfirm();
-        };
-
-        btnCancel.onclick = () => {
-            this.closeModal(modal);
-        };
-
-        this.openModal(modal);
-    }
-
-    // ==========================================
-    // Online Multiplayer Handlers
-    // ==========================================
-
-    handleCreateOnlineRoom() {
-        const timeLimit = this.dom.onlineTimeSelect ? parseInt(this.dom.onlineTimeSelect.value, 10) : this.turnTimeLimit;
-        this.setTimeLimit(timeLimit);
-        const timeLabel = timeLimit > 0 ? `${timeLimit}s/lượt` : 'Vô hạn';
-
-        if (this.dom.btnCreateRoom) {
-            this.dom.btnCreateRoom.innerHTML = '⏳ Đang tạo...';
-            this.dom.btnCreateRoom.disabled = true;
-        }
-
-        this.dom.onlineStatusText.textContent = `Đang khởi tạo phòng thi đấu (${timeLabel})...`;
-        this.online.createRoom(timeLimit, (roomCode) => {
-            this.dom.onlineRoomCodeDisplay.textContent = roomCode;
-            this.dom.onlineStatusText.textContent = `Phòng đã sẵn sàng! Thời gian: ${timeLabel}. Hãy sao chép link hoặc gửi mã cho bạn bè.`;
-            this.updatePlayerLabels();
-
-            // Host avatar setup
-            this.receiveOnlineAvatar('X', this.online.myAvatar);
-
-            // Update URL and copy link
-            const url = new URL(window.location.href);
-            url.searchParams.set('room', roomCode);
-            window.history.pushState({}, '', url);
-
-            navigator.clipboard.writeText(url.toString()).then(() => {
-                this.showToast(`✅ Đã tạo phòng ${roomCode} và copy link! Hãy gửi link cho bạn bè để chơi ngay.`);
-            }).catch(() => {
-                this.showToast(`✅ Đã tạo phòng ${roomCode}. Hãy copy link ở thanh địa chỉ web để gửi cho bạn bè!`);
-            });
-
-            this.closeModal(this.dom.onlineModal);
-
-            if (this.dom.btnCreateRoom) {
-                this.dom.btnCreateRoom.innerHTML = '🎲 Tạo phòng thi đấu';
-                this.dom.btnCreateRoom.disabled = false;
-            }
-        });
-    }
-
-    handleJoinOnlineRoom(customCode) {
-        const code = customCode || (this.dom.inputJoinCode ? this.dom.inputJoinCode.value.trim() : '');
-        if (!code) {
-            this.showToast('Vui lòng nhập mã phòng!');
-            return;
-        }
-
-        if (this.dom.btnJoinRoom) {
-            this.dom.btnJoinRoom.innerHTML = '⏳ Đang vào...';
-            this.dom.btnJoinRoom.disabled = true;
-        }
-
-        this.dom.onlineStatusText.textContent = `Đang kết nối vào phòng ${code}...`;
-        this.online.joinRoom(code, () => {
-            this.dom.onlineRoomCodeDisplay.textContent = code;
-            this.updatePlayerLabels();
-            this.showToast(`✅ Đã kết nối vào phòng ${code} thành công!`);
-            this.closeModal(this.dom.onlineModal);
-
-            if (this.dom.btnJoinRoom) {
-                this.dom.btnJoinRoom.innerHTML = 'Vào phòng';
-                this.dom.btnJoinRoom.disabled = false;
-            }
-        }, () => {
-            this.showToast(`❌ Không tìm thấy phòng ${code}!`);
-            if (this.dom.btnJoinRoom) {
-                this.dom.btnJoinRoom.innerHTML = 'Vào phòng';
-                this.dom.btnJoinRoom.disabled = false;
-            }
-            this.dom.onlineStatusText.textContent = `Hệ thống: Phòng thi đấu P2P đã sẵn sàng!`;
-        });
-    }
-
-    copyInviteLink() {
-        const roomCode = this.online.roomCode || this.dom.onlineRoomCodeDisplay.textContent;
-        if (!roomCode || roomCode === '------') {
-            this.showToast('Chưa có mã phòng để sao chép!');
-            return;
-        }
-
-        const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
-        navigator.clipboard.writeText(url).then(() => {
-            this.showToast('📋 Đã sao chép link phòng! Hãy gửi cho bạn bè.');
-        }).catch(() => {
-            prompt('Sao chép link mời sau:', url);
-        });
-    }
-
+    
+    // Online Callbacks
     onOnlineConnected(info) {
-        if (typeof info.timeLimit !== 'undefined') {
-            this.setTimeLimit(info.timeLimit);
+        this.gameMode = 'online';
+        if (info.usedSwapCard) {
+            this.usedSwapCard = info.usedSwapCard;
         }
-
-        this.closeModal(this.dom.onlineModal);
-
-        if (info.myPiece === 'spectator') {
-            this.showToast(`🎉 Đã tham gia phòng ${info.roomCode} với tư cách KHÁN GIẢ!`);
-            this.dom.onlineStatusText.textContent = `🟢 Bạn đang ở chế độ KHÁN GIẢ. Chỉ có thể xem.`;
-
-            this.updatePlayerLabels();
-
-            if (info.hostAvatar) this.receiveOnlineAvatar('X', info.hostAvatar);
-            if (info.guestAvatar) this.receiveOnlineAvatar('O', info.guestAvatar);
-
-            this.board = info.board || Array(this.boardSize).fill(null).map(() => Array(this.boardSize).fill(null));
+        if (info.board && info.moveHistory && info.moveHistory.length > 0) {
+            this.boardSize = info.board.length;
+            this.board = info.board;
+            this.moveHistory = info.moveHistory;
             this.currentTurn = info.currentTurn || 'X';
-            this.score = info.score || { X: 0, O: 0, ties: 0 };
-            this.moveHistory = info.moveHistory || [];
-
-            this.updateScoreDisplay();
+            this.lastMove = this.moveHistory[this.moveHistory.length - 1];
+            
             this.renderBoardGrid();
-
             for (let r = 0; r < this.boardSize; r++) {
                 for (let c = 0; c < this.boardSize; c++) {
-                    if (this.board[r][c] !== null) {
+                    if (this.board[r][c]) {
                         this.renderStone(r, c, this.board[r][c], false);
                     }
                 }
             }
-
-            // Mark last move if exists
-            const lastMove = this.moveHistory[this.moveHistory.length - 1];
-            if (lastMove) {
-                const lastCell = this.getCellElement(lastMove.r, lastMove.c);
-                if (lastCell) lastCell.classList.add('last-move');
+            if (this.lastMove) {
+                const cell = this.getCellElement(this.lastMove.r, this.lastMove.c);
+                if (cell) cell.querySelector('.stone').classList.add('last-move');
             }
-
-            this.updateUI();
         } else {
-            const timeLabel = this.turnTimeLimit > 0 ? `${this.turnTimeLimit}s/lượt` : 'Vô hạn';
-            this.showToast(`🎉 Đối thủ đã tham gia phòng ${info.roomCode}!`);
-            this.dom.onlineStatusText.textContent = `🟢 Đã kết nối với đối thủ! Bạn cầm quân [${info.myPiece}]. Thời gian: ${timeLabel}.`;
-            this.updatePlayerLabels();
             this.startNewGame();
         }
+        this.addChatLog(`Đã tham gia bàn ${info.roomCode}`, true);
+        this.updateUI();
     }
-
-    receiveOnlineAvatar(piece, avatar) {
-        if (piece === 'X') {
-            if (this.dom.playerXAvatar) this.dom.playerXAvatar.textContent = avatar;
-        } else if (piece === 'O') {
-            if (this.dom.playerOAvatar) this.dom.playerOAvatar.textContent = avatar;
-        }
-    }
-
     onOnlineDisconnected() {
-        this.showToast('⚠️ Mất kết nối với đối thủ!');
-        if (this.dom.onlineStatusText) {
-            this.dom.onlineStatusText.textContent = '🔴 Đã ngắt kết nối với đối thủ.';
-        }
+        this.addChatLog('Đã ngắt kết nối', true);
     }
-
-    updatePingDisplay(ms) {
-        if (!this.dom.onlinePingDisplay) return;
-        this.dom.onlinePingDisplay.textContent = `${ms} ms`;
-        if (ms < 80) {
-            this.dom.onlinePingDisplay.className = 'ping-good';
-        } else if (ms < 180) {
-            this.dom.onlinePingDisplay.className = 'ping-fair';
-        } else {
-            this.dom.onlinePingDisplay.className = 'ping-poor';
-        }
-    }
-
     receiveOnlineMove(r, c, player) {
-        if (player !== this.currentTurn) return;
         this.makeMove(r, c, player);
     }
-
     receiveOnlineNewGame() {
-        this.showToast('Đối thủ đã bắt đầu ván mới!');
         this.startNewGame();
     }
-
-    receiveOnlineUndoRequest() {
-        this.showConfirmModal('Đối thủ xin đi lại', 'Đối thủ muốn rút lại nước đi vừa rồi. Bạn có đồng ý không?', () => {
-            this.online.sendUndoResponse(true);
-            this.undoSingleMove();
-            this.currentTurn = this.moveHistory.length % 2 === 0 ? 'X' : 'O';
-            this.resetTimer();
-            this.updateUI();
-        });
-    }
-
-    receiveOnlineUndoResponse(accepted) {
-        if (accepted) {
-            this.showToast('Đối thủ đã đồng ý cho đi lại!');
-            this.undoSingleMove();
-            this.currentTurn = this.moveHistory.length % 2 === 0 ? 'X' : 'O';
-            this.resetTimer();
-            this.updateUI();
-        } else {
-            this.showToast('Đối thủ không đồng ý cho đi lại.');
-        }
-    }
-
-    receiveOnlineResign() {
-        this.showToast('Đối thủ đã đầu hàng!');
-        const winner = this.online.myPiece;
-        this.handleWin(winner, null);
-    }
-
-    sendEmote(emoji) {
-        window.soundEngine.playPop();
-        this.showFloatingEmote(emoji, true);
-        if (this.gameMode === 'online') {
-            this.online.sendEmote(emoji);
-        }
-    }
-
-    receiveOnlineEmote(emoji) {
-        window.soundEngine.playPop();
-        this.showFloatingEmote(emoji, false);
-    }
-
-    showFloatingEmote(emoji, isMe = true) {
-        const bubble = document.createElement('div');
-        bubble.className = `floating-emote ${isMe ? 'from-me' : 'from-opponent'}`;
-        bubble.textContent = emoji;
-
-        const targetCard = isMe ? this.dom.playerXCard : this.dom.playerOCard;
-        if (targetCard) {
-            targetCard.appendChild(bubble);
-            setTimeout(() => bubble.remove(), 2500);
-        }
-    }
-
-    sendChatMessage() {
-        const text = this.dom.chatInput.value.trim();
-        if (!text) return;
-
-        this.addChatMessage(text, 'me');
-        this.dom.chatInput.value = '';
-
-        if (this.gameMode === 'online') {
-            this.online.sendChat(text);
-        }
-    }
-
-    receiveOnlineChat(text) {
-        window.soundEngine.playPop();
-        this.addChatMessage(text, 'opponent');
-    }
-
-    addChatMessage(text, sender) {
-        if (!this.dom.chatMessages) return;
-
-        const msgEl = document.createElement('div');
-        msgEl.className = `chat-msg msg-${sender}`;
-        msgEl.innerHTML = `<strong>${sender === 'me' ? 'Bạn' : 'Đối thủ'}:</strong> ${this.escapeHTML(text)}`;
-
-        this.dom.chatMessages.appendChild(msgEl);
-        this.dom.chatMessages.scrollTop = this.dom.chatMessages.scrollHeight;
-    }
-
-    escapeHTML(str) {
-        const p = document.createElement('p');
-        p.textContent = str;
-        return p.innerHTML;
-    }
+    updatePingDisplay() {}
 }
 
-// Instantiate game on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
-    window.caroGame = new CaroGame();
+    window.game = new CaroGame();
 });

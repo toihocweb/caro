@@ -1,0 +1,14 @@
+# Python scripts used for patching
+*.py
+# Backup files
+*.bak
+# Mac OS files
+.DS_Store
+# Temporary JS files
+game_patch.js
+modify_game.js
+# IDE folders
+.vscode/
+.idea/
+# Agent folders
+.agents/

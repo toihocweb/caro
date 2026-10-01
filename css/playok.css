@@ -1,0 +1,269 @@
+body, html {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    font-family: Arial, sans-serif;
+    background-color: #eaa254;
+}
+
+.playok-container {
+    display: flex;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.playok-board-area {
+    flex: 1;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #eaa254;
+    overflow: hidden;
+}
+
+.board-wrapper {
+    position: relative;
+    width: min(90vh, 90vw);
+    height: min(90vh, 90vw);
+    max-width: 800px;
+    max-height: 800px;
+}
+
+.goban-board {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.board-grid {
+    position: absolute;
+    inset: 0;
+    display: grid;
+}
+
+.board-cell {
+    position: relative;
+}
+
+.board-cell::before {
+    content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+    background: #000; pointer-events: none;
+}
+.board-cell::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+    background: #000; pointer-events: none;
+}
+.board-cell.edge-top::after { top: 50%; }
+.board-cell.edge-bottom::after { bottom: 50%; }
+.board-cell.edge-left::before { left: 50%; }
+.board-cell.edge-right::before { right: 50%; }
+
+.stone {
+    position: relative;
+    width: 90%; height: 90%;
+    border-radius: 50%;
+    z-index: 5;
+    margin: 5%;
+}
+.stone-x { background-color: #000; box-shadow: 1px 1px 3px rgba(0,0,0,0.5); }
+.stone-o { background-color: #fff; box-shadow: 1px 1px 3px rgba(0,0,0,0.5); }
+.stone.last-move::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 30%; height: 30%;
+    background: red;
+    border-radius: 50%;
+}
+
+.btn-sit-board {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 10px 40px;
+    background-color: #e33022;
+    color: white;
+    border: 2px solid white;
+    font-weight: bold;
+    font-size: 16px;
+    cursor: pointer;
+    z-index: 10;
+}
+
+/* Sidebar */
+.playok-sidebar {
+    width: 320px;
+    background-color: #9bd6f4;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid #73b3d6;
+}
+
+.sidebar-header {
+    background-color: #88cbf0;
+    padding: 5px 10px;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #73b3d6;
+}
+.header-controls button {
+    background: white; border: 1px solid #ccc; cursor: pointer; padding: 2px 6px;
+}
+
+.players-area {
+    display: flex;
+    padding: 10px;
+    gap: 10px;
+}
+.player-slot {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.slot-header {
+    background-color: #333;
+    color: white;
+    font-size: 12px;
+    padding: 2px 5px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.piece-icon {
+    display: inline-block; width: 8px; height: 8px;
+}
+.piece-icon.black { background: #000; border: 1px solid #666; }
+.piece-icon.white { background: #fff; border: 1px solid #666; }
+
+.slot-content {
+    background: #fff;
+    border: 1px solid #ccc;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.btn-sit {
+    border: none; background: transparent; cursor: pointer; color: #666; width: 100%; height: 100%;
+}
+.player-name {
+    font-weight: bold; font-size: 14px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+}
+.slot-timer {
+    font-size: 12px; padding-top: 2px;
+}
+
+.actions-area {
+    display: flex; flex-wrap: wrap; gap: 5px; padding: 0 10px 10px;
+    border-bottom: 1px solid #73b3d6;
+}
+.btn-action {
+    background: transparent; border: 1px solid #73b3d6; padding: 4px 8px; cursor: pointer; font-size: 12px;
+}
+.btn-action:hover { background: rgba(255,255,255,0.2); }
+
+.tabs-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.tabs-header {
+    display: flex;
+}
+.tab-btn {
+    padding: 6px 12px; font-size: 13px; color: white; background: #6899c4; cursor: pointer;
+    border-right: 1px solid #5a87b0;
+}
+.tab-btn.active {
+    background: #fff; color: #333;
+}
+.tabs-content {
+    flex: 1; background: #fff; display: flex; flex-direction: column;
+}
+.tab-pane {
+    display: none; flex: 1; flex-direction: column; overflow-y: auto;
+}
+.tab-pane.active {
+    display: flex;
+}
+
+#chat-log {
+    flex: 1; padding: 5px; font-size: 13px; overflow-y: auto; color: #333;
+}
+.chat-sys { color: #555; }
+.chat-input-area {
+    display: flex; background: #9bd6f4; padding: 5px; gap: 5px;
+}
+.btn-emoji {
+    background: white; border: none; cursor: pointer; padding: 2px 8px; font-weight: bold;
+}
+#chat-input {
+    flex: 1; border: none; padding: 4px; outline: none;
+}
+
+/* Winning line highlight */
+.stone.winning-stone {
+    animation: blink-win 1s infinite;
+}
+
+@keyframes blink-win {
+    0% { box-shadow: 0 0 0px 0px rgba(0, 255, 0, 0); }
+    50% { box-shadow: 0 0 10px 4px rgba(0, 255, 0, 0.8); }
+    100% { box-shadow: 0 0 0px 0px rgba(0, 255, 0, 0); }
+}
+
+.swap-card-container {
+    margin-top: 5px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+.swap-card-container:hover {
+    transform: scale(1.1);
+}
+.swap-card {
+    width: 40px;
+    height: 40px;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+}
+.swap-card-container.used .swap-card {
+    filter: grayscale(100%) opacity(0.5);
+    cursor: not-allowed;
+}
+.swap-card-container.used {
+    pointer-events: none;
+}
+
+.hand-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+@keyframes swapActivate {
+    0% { transform: scale(1) rotate(0deg); box-shadow: 0 0 0px gold; }
+    50% { transform: scale(1.5) rotate(180deg); box-shadow: 0 0 30px gold; }
+    100% { transform: scale(1) rotate(360deg); box-shadow: 0 0 0px gold; }
+}
+.card-activating .swap-card {
+    animation: swapActivate 1s ease-in-out;
+}
+.card-activating {
+    z-index: 100;
+}
+
+@keyframes boardShake {
+    0% { transform: translate(0, 0) scale(1) rotate(0deg); filter: hue-rotate(0deg); }
+    25% { transform: translate(-10px, 10px) scale(0.95) rotate(-2deg); filter: hue-rotate(90deg); }
+    50% { transform: translate(10px, -10px) scale(0.9) rotate(2deg); filter: hue-rotate(180deg); }
+    75% { transform: translate(-10px, -10px) scale(0.95) rotate(-2deg); filter: hue-rotate(270deg); }
+    100% { transform: translate(0, 0) scale(1) rotate(0deg); filter: hue-rotate(360deg); }
+}
+.board-swapping {
+    animation: boardShake 1s ease-in-out;
+}

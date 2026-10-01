@@ -767,19 +767,19 @@ button {
 }
 
 /* Boundary line handling for clean borders */
-.board-cell[data-row="0"]::after {
+.board-cell.edge-top::after {
     top: 50%;
 }
 
-.board-cell[data-row="14"]::after {
+.board-cell.edge-bottom::after {
     bottom: 50%;
 }
 
-.board-cell[data-col="0"]::before {
+.board-cell.edge-left::before {
     left: 50%;
 }
 
-.board-cell[data-col="14"]::before {
+.board-cell.edge-right::before {
     right: 50%;
 }
 
@@ -1892,4 +1892,11 @@ button {
 
 .board-3d-container {
     overflow: visible; /* allow 3D objects to extend slightly */
+}
+
+.goban-board {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
 }
